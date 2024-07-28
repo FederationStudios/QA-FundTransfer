@@ -1,0 +1,36 @@
+2024-07-29 00:23:54,074 - ERROR - Task exception was never retrieved
+future: <Task finished name='CommandTree-invoker' coro=<CommandTree._from_interaction.<locals>.wrapper() done, defined at C:\Python312\Lib\site-packages\discord\app_commands\tree.py:1149> exception=NotFound('404 Not Found (error code: 10015): Unknown Webhook')>
+Traceback (most recent call last):
+  File "C:\Python312\Lib\site-packages\discord\app_commands\tree.py", line 1310, in _call
+    await command._invoke_with_namespace(interaction, namespace)
+  File "C:\Python312\Lib\site-packages\discord\app_commands\commands.py", line 879, in _invoke_with_namespace
+    if not await self._check_can_run(interaction):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python312\Lib\site-packages\discord\app_commands\commands.py", line 1017, in _check_can_run
+    return await async_all(f(interaction) for f in predicates)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python312\Lib\site-packages\discord\utils.py", line 706, in async_all
+    elem = await elem
+           ^^^^^^^^^^
+  File "C:\Users\SOUNAK BERA\Bot Stuff\FundTransfer-Bot\cogs\grouppayout.py", line 20, in predicate
+    raise discord.app_commands.MissingPermissions(missing_permissions=role_names)
+discord.app_commands.errors.MissingPermissions: You are missing Quartermaster Command permission(s) to run this command.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Python312\Lib\site-packages\discord\app_commands\tree.py", line 1151, in wrapper
+    await self._call(interaction)
+  File "C:\Python312\Lib\site-packages\discord\app_commands\tree.py", line 1313, in _call
+    await command._invoke_error_handlers(interaction, e)
+  File "C:\Python312\Lib\site-packages\discord\app_commands\commands.py", line 800, in _invoke_error_handlers
+    await self.on_error(self.binding, interaction, error)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SOUNAK BERA\Bot Stuff\FundTransfer-Bot\cogs\grouppayout.py", line 138, in group_payout_error
+    await interaction.followup.send(f"You do not have the required roles to use this command: {missing_roles}", ephemeral=True)
+  File "C:\Python312\Lib\site-packages\discord\webhook\async_.py", line 1843, in send
+    data = await adapter.execute_webhook(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python312\Lib\site-packages\discord\webhook\async_.py", line 221, in request
+    raise NotFound(response, data)
+discord.errors.NotFound: 404 Not Found (error code: 10015): Unknown Webhook

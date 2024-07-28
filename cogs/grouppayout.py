@@ -6,8 +6,11 @@ import json
 import pyotp
 import os
 from dotenv import load_dotenv
+import logging
 
-load_dotenv()  # Load environment variables from .env file
+load_dotenv()
+
+logging.basicConfig(filename='group_payout_errors.log', level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def has_any_role(*role_names):
     async def predicate(interaction: discord.Interaction):
@@ -24,7 +27,7 @@ class GroupPayout(commands.Cog):
 
     @discord.app_commands.command(name='grouppayout', description='Payout members in a Roblox group')
     @discord.app_commands.describe(username="Roblox username to payout", amount="Amount of Robux to payout")
-    @has_any_role("Quartermaster Command")  # Add any other roles you want to check
+    @has_any_role("Quartermaster Command", "Personnel")
     async def group_payout(self, interaction: discord.Interaction, username: str, amount: int):
         await interaction.response.defer()  # Defer the response to avoid timeout
 
@@ -36,7 +39,7 @@ class GroupPayout(commands.Cog):
             account_token = os.getenv('ROBLOX_COOKIE')
             group_id = os.getenv('GROUP_ID')
             twofactor_secret = os.getenv('TWOFACTOR_SECRET')
-            
+
             # Get user ID from username
             user_id_response = requests.get(f"https://users.roblox.com/v1/users/search?keyword={username}")
             if user_id_response.status_code != 200 or len(user_id_response.json()["data"]) == 0:
@@ -44,11 +47,11 @@ class GroupPayout(commands.Cog):
                 await interaction.followup.send(embed=embed)
                 return
             user_id = user_id_response.json()["data"][0]["id"]
-            
+
             # Generate the 2FA code
             totp = pyotp.TOTP(twofactor_secret)
             twofactorcode = totp.now()
-            
+
             # Variables for the whole process
             full_cookie = ".ROBLOSECURITY=" + account_token
             csrf_token = requests.post("https://auth.roblox.com/v2/logout", headers={'Cookie': full_cookie}).headers['X-CSRF-TOKEN']
@@ -72,19 +75,19 @@ class GroupPayout(commands.Cog):
                     return "Robux successfully sent!"
                 else:
                     return f"payout error: {payout_request.json()['errors'][0]['message']} - Status Code: {payout_request.status_code} - Body: {payout_request.json()}"
-            
+
             data = request_payout()
             if isinstance(data, str):
                 embed.add_field(name="Status", value=data, inline=False)
                 await interaction.followup.send(embed=embed)
                 return
-            
+
             # Get necessary data for the 2FA validation
             challengeId = data.headers["rblx-challenge-id"]
             metadata = json.loads(base64.b64decode(data.headers["rblx-challenge-metadata"]))
             metadata_challengeId = metadata["challengeId"]
             senderId = metadata["userId"]
-            
+
             # Make the actual 2FA validation
             twofactor_request_body = {
                 "actionType": "Generic",
@@ -92,15 +95,15 @@ class GroupPayout(commands.Cog):
                 "code": twofactorcode
             }
             twofactor_request = requests.post(f"https://twostepverification.roblox.com/v1/users/{senderId}/challenges/authenticator/verify", headers={'Cookie': full_cookie, 'X-CSRF-TOKEN': csrf_token}, json=twofactor_request_body)
-            
+
             if "errors" in twofactor_request.json():
                 embed.add_field(name="2FA Error", value=twofactor_request.json()['errors'][0]['message'], inline=False)
                 await interaction.followup.send(embed=embed)
                 return
-            
+
             # The 2FA code worked!
             verification_token = twofactor_request.json()["verificationToken"]
-            
+
             # Now it's time for the continue request (it's really important)
             continue_request_body = {
                 "challengeId": challengeId,
@@ -113,7 +116,7 @@ class GroupPayout(commands.Cog):
                 "challengeType": "twostepverification"
             }
             continue_request = requests.post("https://apis.roblox.com/challenge/v1/continue", headers={'Cookie': full_cookie, 'X-CSRF-TOKEN': csrf_token}, json=continue_request_body)
-            
+
             # Everything should be validated! Making the final payout request.
             data = request_payout()
             if isinstance(data, str):
@@ -125,6 +128,7 @@ class GroupPayout(commands.Cog):
         except Exception as e:
             embed.add_field(name="Error", value=f'Failed to pay out: {e}', inline=False)
             await interaction.followup.send(embed=embed)
+            logging.error(f"Failed to pay out: {e}")
 
     @group_payout.error
     async def group_payout_error(self, interaction: discord.Interaction, error: Exception):
@@ -134,6 +138,7 @@ class GroupPayout(commands.Cog):
             await interaction.followup.send(f"You do not have the required roles to use this command: {missing_roles}", ephemeral=True)
         else:
             await interaction.followup.send(f"An error occurred: {str(error)}", ephemeral=True)
+        logging.error(f"Error in group_payout command: {error}")
 
 async def setup(bot):
     await bot.add_cog(GroupPayout(bot))
