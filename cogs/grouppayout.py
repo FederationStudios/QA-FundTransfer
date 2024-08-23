@@ -28,7 +28,7 @@ class GroupPayout(commands.Cog):
 
     @discord.app_commands.command(name='grouppayout', description='Payout members in a Roblox group')
     @discord.app_commands.describe(username="Roblox username to payout", amount="Amount of Robux to payout")
-    @has_any_role("Treasury Access")
+    @has_any_role("Treasury Access", "Liaison")
     async def group_payout(self, interaction: discord.Interaction, username: str, amount: int):
         # Check if amount exceeds the limit
         if amount > 35:
@@ -47,6 +47,7 @@ class GroupPayout(commands.Cog):
             account_token = os.getenv('ROBLOX_COOKIE')
             group_id = os.getenv('GROUP_ID')
             twofactor_secret = os.getenv('TWOFACTOR_SECRET')
+            log_channel_id = int(os.getenv('LOG_CHANNEL_ID'))  # Get the log channel ID from environment variables
 
             # Get user ID from username
             user_id_response = requests.get(f"https://users.roblox.com/v1/users/search?keyword={username}")
@@ -91,6 +92,10 @@ class GroupPayout(commands.Cog):
             if isinstance(data, str):
                 embed.add_field(name="Status", value=data, inline=False)
                 await interaction.followup.send(embed=embed)
+                # Log the payout details to a specific channel
+                log_channel = self.bot.get_channel(log_channel_id)
+                if log_channel:
+                    await log_channel.send(f"Payout successful: **{username}** received **{amount} Robux** at **{interaction.created_at}**")
                 return
 
             # Get necessary data for the 2FA validation
@@ -140,6 +145,10 @@ class GroupPayout(commands.Cog):
             if isinstance(data, str):
                 embed.add_field(name="Status", value=data, inline=False)
                 await interaction.followup.send(embed=embed)
+                # Log the payout details to a specific channel
+                log_channel = self.bot.get_channel(log_channel_id)
+                if log_channel:
+                    await log_channel.send(f"Payout successful: **{username}** received **{amount} Robux** at **{interaction.created_at}**")
             else:
                 embed.add_field(name="2FA Validation", value="The 2FA validation didn't work.", inline=False)
                 await interaction.followup.send(embed=embed)
@@ -148,6 +157,10 @@ class GroupPayout(commands.Cog):
             embed.add_field(name="Error", value=f'Failed to pay out: {e}', inline=False)
             await interaction.followup.send(embed=embed)
             logging.error(f"Failed to pay out: {e}")
+            # Log the error to a specific channel
+            log_channel = self.bot.get_channel(log_channel_id)
+            if log_channel:
+                await log_channel.send(f"Error processing payout for **{username}**: {e}")
 
     @group_payout.error
     async def group_payout_error(self, interaction: discord.Interaction, error: Exception):
