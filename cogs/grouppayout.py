@@ -10,6 +10,7 @@ import logging
 
 load_dotenv()
 
+# Set up logging
 logging.basicConfig(filename='group_payout_errors.log', level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def has_any_role(*role_names):
@@ -27,8 +28,15 @@ class GroupPayout(commands.Cog):
 
     @discord.app_commands.command(name='grouppayout', description='Payout members in a Roblox group')
     @discord.app_commands.describe(username="Roblox username to payout", amount="Amount of Robux to payout")
-    @has_any_role("Quartermaster Command", "Personnel")
+    @has_any_role("Treasury Access")
     async def group_payout(self, interaction: discord.Interaction, username: str, amount: int):
+        # Check if amount exceeds the limit
+        if amount > 35:
+            embed = discord.Embed(title="Group Payout", color=discord.Color.red())
+            embed.add_field(name="Error", value="The payout amount cannot be greater than 35 Robux.", inline=False)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
         await interaction.response.defer()  # Defer the response to avoid timeout
 
         embed = discord.Embed(title="Group Payout", color=discord.Color.blue())
@@ -42,17 +50,17 @@ class GroupPayout(commands.Cog):
 
             # Get user ID from username
             user_id_response = requests.get(f"https://users.roblox.com/v1/users/search?keyword={username}")
-            if user_id_response.status_code != 200 or len(user_id_response.json()["data"]) == 0:
+            if user_id_response.status_code != 200 or not user_id_response.json()["data"]:
                 embed.add_field(name="Error", value=f"Could not find user ID for username {username}.", inline=False)
                 await interaction.followup.send(embed=embed)
                 return
+
             user_id = user_id_response.json()["data"][0]["id"]
 
             # Generate the 2FA code
             totp = pyotp.TOTP(twofactor_secret)
             twofactorcode = totp.now()
 
-            # Variables for the whole process
             full_cookie = ".ROBLOSECURITY=" + account_token
             csrf_token = requests.post("https://auth.roblox.com/v2/logout", headers={'Cookie': full_cookie}).headers['X-CSRF-TOKEN']
             payout_request_body = {
@@ -66,15 +74,18 @@ class GroupPayout(commands.Cog):
                 ]
             }
 
-            # Function to request the payout
             def request_payout():
-                payout_request = requests.post(f"https://groups.roblox.com/v1/groups/{group_id}/payouts", headers={'Cookie': full_cookie, 'X-CSRF-TOKEN': csrf_token}, json=payout_request_body)
-                if payout_request.status_code == 403 and payout_request.json()["errors"][0]["message"] == "Challenge is required to authorize the request":
+                payout_request = requests.post(
+                    f"https://groups.roblox.com/v1/groups/{group_id}/payouts",
+                    headers={'Cookie': full_cookie, 'X-CSRF-TOKEN': csrf_token},
+                    json=payout_request_body
+                )
+                if payout_request.status_code == 403 and payout_request.json().get("errors", [{}])[0].get("message") == "Challenge is required to authorize the request":
                     return payout_request
                 elif payout_request.status_code == 200:
                     return "Robux successfully sent!"
                 else:
-                    return f"payout error: {payout_request.json()['errors'][0]['message']} - Status Code: {payout_request.status_code} - Body: {payout_request.json()}"
+                    return f"payout error: {payout_request.json().get('errors', [{}])[0].get('message')} - Status Code: {payout_request.status_code} - Body: {payout_request.json()}"
 
             data = request_payout()
             if isinstance(data, str):
@@ -94,17 +105,20 @@ class GroupPayout(commands.Cog):
                 "challengeId": metadata_challengeId,
                 "code": twofactorcode
             }
-            twofactor_request = requests.post(f"https://twostepverification.roblox.com/v1/users/{senderId}/challenges/authenticator/verify", headers={'Cookie': full_cookie, 'X-CSRF-TOKEN': csrf_token}, json=twofactor_request_body)
+            twofactor_request = requests.post(
+                f"https://twostepverification.roblox.com/v1/users/{senderId}/challenges/authenticator/verify",
+                headers={'Cookie': full_cookie, 'X-CSRF-TOKEN': csrf_token},
+                json=twofactor_request_body
+            )
 
             if "errors" in twofactor_request.json():
                 embed.add_field(name="2FA Error", value=twofactor_request.json()['errors'][0]['message'], inline=False)
                 await interaction.followup.send(embed=embed)
                 return
 
-            # The 2FA code worked!
             verification_token = twofactor_request.json()["verificationToken"]
 
-            # Now it's time for the continue request (it's really important)
+            # Continue request for 2FA
             continue_request_body = {
                 "challengeId": challengeId,
                 "challengeMetadata": json.dumps({
@@ -115,9 +129,13 @@ class GroupPayout(commands.Cog):
                 }),
                 "challengeType": "twostepverification"
             }
-            continue_request = requests.post("https://apis.roblox.com/challenge/v1/continue", headers={'Cookie': full_cookie, 'X-CSRF-TOKEN': csrf_token}, json=continue_request_body)
+            continue_request = requests.post(
+                "https://apis.roblox.com/challenge/v1/continue",
+                headers={'Cookie': full_cookie, 'X-CSRF-TOKEN': csrf_token},
+                json=continue_request_body
+            )
 
-            # Everything should be validated! Making the final payout request.
+            # Final payout request
             data = request_payout()
             if isinstance(data, str):
                 embed.add_field(name="Status", value=data, inline=False)
@@ -125,6 +143,7 @@ class GroupPayout(commands.Cog):
             else:
                 embed.add_field(name="2FA Validation", value="The 2FA validation didn't work.", inline=False)
                 await interaction.followup.send(embed=embed)
+
         except Exception as e:
             embed.add_field(name="Error", value=f'Failed to pay out: {e}', inline=False)
             await interaction.followup.send(embed=embed)
