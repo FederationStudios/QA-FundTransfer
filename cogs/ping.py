@@ -17,7 +17,7 @@ class PingCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="ping", description="Check the bot's latency")
-    @has_any_role("QM Command", "QM Staff Corps")  # Replace with the names of the roles you want to check
+    @has_any_role("QM Command", "QM Staff Corps", "Liaison")  # Replace with the names of the roles you want to check
     async def ping(self, interaction: Interaction):
         await interaction.response.send_message(f"Pong! Latency is {self.bot.latency * 1000:.2f}ms")
 

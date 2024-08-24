@@ -58,106 +58,105 @@ class GroupPayout(commands.Cog):
 
             user_id = user_id_response.json()["data"][0]["id"]
 
-            # Generate the 2FA code
-            totp = pyotp.TOTP(twofactor_secret)
-            twofactorcode = totp.now()
+            headers = {'Cookie': f".ROBLOSECURITY={account_token}"}
 
-            full_cookie = ".ROBLOSECURITY=" + account_token
-            csrf_token = requests.post("https://auth.roblox.com/v2/logout", headers={'Cookie': full_cookie}).headers['X-CSRF-TOKEN']
-            payout_request_body = {
-                "PayoutType": "FixedAmount",
-                "Recipients": [
-                    {
-                        "amount": amount,
-                        "recipientId": user_id,
-                        "recipientType": "User"
-                    }
-                ]
-            }
+            # Function to set CSRF token
+            def set_csrf():
+                request = requests.post("https://auth.roblox.com/v2/logout", headers=headers)
+                if request.status_code == 401:
+                    raise ValueError("Incorrect roblosecurity cookie")
+                headers.update({'X-CSRF-TOKEN': request.headers['X-CSRF-TOKEN']})
 
-            def request_payout():
-                payout_request = requests.post(
-                    f"https://groups.roblox.com/v1/groups/{group_id}/payouts",
-                    headers={'Cookie': full_cookie, 'X-CSRF-TOKEN': csrf_token},
-                    json=payout_request_body
-                )
-                if payout_request.status_code == 403 and payout_request.json().get("errors", [{}])[0].get("message") == "Challenge is required to authorize the request":
-                    return payout_request
-                elif payout_request.status_code == 200:
+            # Function to send payout request
+            def payout_request():
+                request = requests.post(f"https://groups.roblox.com/v1/groups/{group_id}/payouts", headers=headers, json={
+                    "PayoutType": "FixedAmount",
+                    "Recipients": [
+                        {
+                            "amount": amount,
+                            "recipientId": user_id,
+                            "recipientType": "User"
+                        }
+                    ]
+                })
+                if request.status_code == 403 and request.json().get("errors", [{}])[0].get("message") == "Challenge is required to authorize the request":
+                    return request
+                elif request.status_code == 200:
                     return "Robux successfully sent!"
                 else:
-                    return f"payout error: {payout_request.json().get('errors', [{}])[0].get('message')} - Status Code: {payout_request.status_code} - Body: {payout_request.json()}"
+                    raise ValueError(f"Payout error: {request.json().get('errors', [{}])[0].get('message')} - Status Code: {request.status_code}")
 
-            data = request_payout()
+            # Function to verify 2FA request
+            def verify_request(senderId, metadata_challengeId):
+                totp = pyotp.TOTP(twofactor_secret)
+                code = totp.now()
+                request = requests.post(f"https://twostepverification.roblox.com/v1/users/{senderId}/challenges/authenticator/verify", headers=headers, json={
+                    "actionType": "Generic",
+                    "challengeId": metadata_challengeId,
+                    "code": code
+                })
+                if "errors" in request.json():
+                    raise ValueError(f"2FA error: {request.json()['errors'][0]['message']}")
+                return request.json()["verificationToken"]
+
+            # Function to continue 2FA request
+            def continue_request(challengeId, verification_token, metadata_challengeId):
+                requests.post("https://apis.roblox.com/challenge/v1/continue", headers=headers, json={
+                    "challengeId": challengeId,
+                    "challengeMetadata": json.dumps({
+                        "rememberDevice": False,
+                        "actionType": "Generic",
+                        "verificationToken": verification_token,
+                        "challengeId": metadata_challengeId
+                    }),
+                    "challengeType": "twostepverification"
+                })
+
+            # Step-by-step process for payout
+            set_csrf()
+            data = payout_request()
             if isinstance(data, str):
                 embed.add_field(name="Status", value=data, inline=False)
                 await interaction.followup.send(embed=embed)
-                # Log the payout details to a specific channel
                 log_channel = self.bot.get_channel(log_channel_id)
                 if log_channel:
                     await log_channel.send(f"Payout successful: **{username}** received **{amount} Robux** at **{interaction.created_at}**")
                 return
 
-            # Get necessary data for the 2FA validation
+            # 2FA Challenge Handling
             challengeId = data.headers["rblx-challenge-id"]
             metadata = json.loads(base64.b64decode(data.headers["rblx-challenge-metadata"]))
             metadata_challengeId = metadata["challengeId"]
             senderId = metadata["userId"]
 
-            # Make the actual 2FA validation
-            twofactor_request_body = {
-                "actionType": "Generic",
-                "challengeId": metadata_challengeId,
-                "code": twofactorcode
-            }
-            twofactor_request = requests.post(
-                f"https://twostepverification.roblox.com/v1/users/{senderId}/challenges/authenticator/verify",
-                headers={'Cookie': full_cookie, 'X-CSRF-TOKEN': csrf_token},
-                json=twofactor_request_body
-            )
+            # Verify 2FA and Continue Request
+            verification_token = verify_request(senderId, metadata_challengeId)
+            continue_request(challengeId, verification_token, metadata_challengeId)
 
-            if "errors" in twofactor_request.json():
-                embed.add_field(name="2FA Error", value=twofactor_request.json()['errors'][0]['message'], inline=False)
-                await interaction.followup.send(embed=embed)
-                return
-
-            verification_token = twofactor_request.json()["verificationToken"]
-
-            # Continue request for 2FA
-            continue_request_body = {
-                "challengeId": challengeId,
-                "challengeMetadata": json.dumps({
+            # Update headers for final payout request
+            headers.update({
+                'rblx-challenge-id': challengeId,
+                'rblx-challenge-metadata': base64.b64encode(json.dumps({
                     "rememberDevice": False,
                     "actionType": "Generic",
                     "verificationToken": verification_token,
                     "challengeId": metadata_challengeId
-                }),
-                "challengeType": "twostepverification"
-            }
-            continue_request = requests.post(
-                "https://apis.roblox.com/challenge/v1/continue",
-                headers={'Cookie': full_cookie, 'X-CSRF-TOKEN': csrf_token},
-                json=continue_request_body
-            )
+                }).encode()).decode(),
+                'rblx-challenge-type': "twostepverification"
+            })
 
             # Final payout request
-            data = request_payout()
-            if isinstance(data, str):
-                embed.add_field(name="Status", value=data, inline=False)
-                await interaction.followup.send(embed=embed)
-                # Log the payout details to a specific channel
-                log_channel = self.bot.get_channel(log_channel_id)
-                if log_channel:
-                    await log_channel.send(f"Payout successful: **{username}** received **{amount} Robux** at **{interaction.created_at}**")
-            else:
-                embed.add_field(name="2FA Validation", value="The 2FA validation didn't work.", inline=False)
-                await interaction.followup.send(embed=embed)
+            data = payout_request()
+            embed.add_field(name="Status", value=data if isinstance(data, str) else "The 2FA validation didn't work.", inline=False)
+            await interaction.followup.send(embed=embed)
+            log_channel = self.bot.get_channel(log_channel_id)
+            if log_channel:
+                await log_channel.send(f"Payout successful: **{username}** received **{amount} Robux** at **{interaction.created_at}**")
 
         except Exception as e:
             embed.add_field(name="Error", value=f'Failed to pay out: {e}', inline=False)
             await interaction.followup.send(embed=embed)
             logging.error(f"Failed to pay out: {e}")
-            # Log the error to a specific channel
             log_channel = self.bot.get_channel(log_channel_id)
             if log_channel:
                 await log_channel.send(f"Error processing payout for **{username}**: {e}")

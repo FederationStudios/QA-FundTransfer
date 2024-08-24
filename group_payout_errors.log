@@ -34,3 +34,6 @@ Traceback (most recent call last):
   File "C:\Python312\Lib\site-packages\discord\webhook\async_.py", line 221, in request
     raise NotFound(response, data)
 discord.errors.NotFound: 404 Not Found (error code: 10015): Unknown Webhook
+2024-08-24 12:47:42,045 - ERROR - Failed to pay out: 'x-csrf-token'
+2024-08-24 12:49:18,673 - ERROR - Failed to pay out: 'x-csrf-token'
+2024-08-24 19:11:35,861 - ERROR - Failed to pay out: Incorrect roblosecurity cookie
